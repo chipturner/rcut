@@ -18,23 +18,18 @@ struct FieldSelector {
 }
 
 fn field_parser(s: &str) -> Result<FieldSelector> {
-    let v = s
+    let field_indexes = s
         .split(',')
         .map(|t| {
-            let ranges = t
-                .split('-')
-                .map(|s| s.parse::<usize>())
-                .collect::<std::result::Result<Vec<usize>, _>>()?;
-            if ranges.len() == 1 {
-                Ok((ranges[0]..=ranges[0]).collect::<Vec<usize>>())
-            } else if ranges.len() == 2 {
-                if ranges[1] < ranges[0] {
-                    Ok((ranges[1]..=ranges[0]).collect::<Vec<usize>>())
-                } else {
-                    Ok((ranges[0]..=ranges[1]).collect::<Vec<usize>>())
-                }
+            let mut ranges = t.splitn(2, '-').map(|s| s.parse::<usize>());
+            let start = ranges
+                .next()
+                .ok_or_else(|| format_err!("empty field range"))??;
+            let stop = ranges.next().unwrap_or(Ok(start))?;
+            if start < stop {
+                Ok((start..=stop).collect::<Vec<usize>>())
             } else {
-                Err(format_err!("invalid range: {:?}", ranges))
+                Ok((stop..=start).rev().collect::<Vec<usize>>())
             }
         })
         .collect::<Result<Vec<Vec<usize>>>>()?
@@ -42,7 +37,9 @@ fn field_parser(s: &str) -> Result<FieldSelector> {
         .flatten()
         .collect::<Vec<usize>>();
 
-    Ok(FieldSelector { fields: v })
+    Ok(FieldSelector {
+        fields: field_indexes,
+    })
 }
 
 #[cfg(test)]
@@ -54,7 +51,7 @@ mod tests {
         assert_eq!(field_parser("1").unwrap().fields, vec![1]);
         assert_eq!(field_parser("1,2").unwrap().fields, vec![1, 2]);
         assert_eq!(field_parser("1-2,3-4").unwrap().fields, vec![1, 2, 3, 4]);
-        assert_eq!(field_parser("2-1,3-4").unwrap().fields, vec![1, 2, 3, 4]);
+        assert_eq!(field_parser("2-1,3-4").unwrap().fields, vec![2, 1, 3, 4]);
     }
 }
 
@@ -99,7 +96,10 @@ fn main() -> Result<()> {
         };
 
         for (idx, field_idx) in selector.fields.iter().enumerate() {
-            stdout.write_all(line_fields[*field_idx].as_bytes())?;
+            match line_fields.get(*field_idx - 1) {
+                None => continue,
+                Some(val) => stdout.write_all(val.as_bytes())?,
+            }
             if idx < selector.fields.len() - 1 {
                 stdout.write_all(b":")?;
             }
