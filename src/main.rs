@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, BufWriter, Write};
 
 extern crate clap;
 use clap::{App, Arg};
@@ -89,7 +89,7 @@ fn main() -> Result<()> {
     let selector = field_parser(matches.value_of("fields").unwrap_or("1"))?;
 
     let stdout = io::stdout();
-    let mut stdout = stdout.lock();
+    let mut stdout = BufWriter::new(stdout.lock());
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
         let line = line?;
