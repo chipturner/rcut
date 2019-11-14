@@ -94,33 +94,62 @@ fn main() -> Result<()> {
 
     let stdout = io::stdout();
     let mut stdout = BufWriter::new(stdout.lock());
-    let stdin = io::stdin();
 
-    let input: Vec<Box<dyn BufRead>> = match matches.values_of("input") {
-        None => vec![Box::new(stdin.lock())],
-        Some(inputs) => inputs
-            .map(|v| -> Box<dyn BufRead> { Box::new(BufReader::new(File::open(v).unwrap())) })
-            .collect(),
-    };
-    for reader in input {
-        for line in reader.lines() {
-            let line = line?;
-            let line_fields: Vec<&str> = match delim {
-                Delimiter::String(ref s) => line.split(s.as_str()).collect(),
-                Delimiter::Whitespace => line.split_whitespace().collect(),
-            };
-
-            for (idx, field_idx) in selector.fields.iter().enumerate() {
-                match line_fields.get(*field_idx - 1) {
-                    None => continue,
-                    Some(val) => stdout.write_all(val.as_bytes())?,
-                }
-                if idx < selector.fields.len() - 1 {
-                    stdout.write_all(b":")?;
-                }
-            }
-            stdout.write_all(b"\n")?;
-        }
+    if let Some(inputs) = matches.values_of_os("input") {
+        inputs
+            .map(|filename| (filename, File::open(filename)))
+            .map(|(filename, result)| {
+                (
+                    filename,
+                    result.map_err(|e| failure::Error::from_boxed_compat(Box::new(e))),
+                )
+            })
+            .map(|(filename, result)| (filename, result.map(BufReader::new)))
+            .map(|(filename, result)| {
+                (
+                    filename,
+                    result.map(|reader| -> Box<dyn BufRead> { Box::new(reader) }),
+                )
+            })
+            .map(|(filename, result)| {
+                (
+                    filename,
+                    result.and_then(|val| process_reader(val, &mut stdout, &delim, &selector)),
+                )
+            })
+            .map(|(_filename, result)| result)
+            .collect::<Result<Vec<()>>>()?;
+    } else {
+        let stdin = io::stdin();
+        process_reader(stdin.lock(), &mut stdout, &delim, &selector)?;
     }
+    Ok(())
+}
+
+fn process_reader<T: BufRead, W: Write>(
+    reader: T,
+    output: &mut W,
+    delim: &Delimiter,
+    selector: &FieldSelector,
+) -> Result<()> {
+    for line in reader.lines() {
+        let line = line?;
+        let line_fields: Vec<&str> = match delim {
+            Delimiter::String(ref s) => line.split(s.as_str()).collect(),
+            Delimiter::Whitespace => line.split_whitespace().collect(),
+        };
+
+        for (idx, field_idx) in selector.fields.iter().enumerate() {
+            match line_fields.get(*field_idx - 1) {
+                None => continue,
+                Some(val) => output.write_all(val.as_bytes())?,
+            }
+            if idx < selector.fields.len() - 1 {
+                output.write_all(b":")?;
+            }
+        }
+        output.write_all(b"\n")?;
+    }
+    output.flush()?;
     Ok(())
 }
