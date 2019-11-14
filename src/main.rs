@@ -20,7 +20,7 @@ struct FieldSelector {
 struct CutJob {
     input_delim: Delimiter,
     selector: FieldSelector,
-    output_delim: String,
+    output_separator: String,
 }
 
 fn field_parser(s: &str) -> Result<FieldSelector> {
@@ -61,6 +61,13 @@ fn main() -> Result<()> {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("output_separator")
+                .short("o")
+                .long("output_separator")
+                .help("separator used when printing fields")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("fields")
                 .short("f")
                 .long("fields")
@@ -84,16 +91,17 @@ fn main() -> Result<()> {
             Delimiter::String(String::from(v))
         });
     let selector = field_parser(matches.value_of("fields").unwrap_or("1"))?;
-    let output_delim = String::from(
+    let output_separator = String::from(
         matches
-            .value_of("output_delimiter")
+            .value_of("output_separator")
             .unwrap_or_else(|| matches.value_of("delimiter").unwrap_or(" ")),
     );
+    dbg!(&matches);
 
     let job = CutJob {
         input_delim,
         selector,
-        output_delim,
+        output_separator,
     };
 
     let stdout = io::stdout();
@@ -151,7 +159,7 @@ impl CutJob {
                     None => continue,
                     Some(val) => {
                         if needs_sep {
-                            output.write_all(self.output_delim.as_bytes())?;
+                            output.write_all(self.output_separator.as_bytes())?;
                         }
                         output.write_all(val.as_bytes())?;
                         needs_sep = true;
@@ -188,7 +196,7 @@ mod tests {
         let job = CutJob {
             input_delim,
             selector,
-            output_delim: " ".to_string(),
+            output_separator: " ".to_string(),
         };
         job.process_reader(input, &mut output).unwrap();
         assert_eq!(output.get_ref(), &"a c e\np r t\ni k\n".as_bytes());
