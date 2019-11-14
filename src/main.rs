@@ -1,4 +1,5 @@
-use std::io::{self, BufRead, BufWriter, Write};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
 extern crate clap;
 use clap::{App, Arg};
@@ -71,9 +72,16 @@ fn main() -> Result<()> {
             Arg::with_name("fields")
                 .short("f")
                 .long("fields")
-                .index(1)
                 .required(true)
                 .help("fields to select")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("input")
+                .help("file(s) to process (otherwise read from stdin)")
+                .index(1)
+                .multiple(true)
+                .required(false)
                 .takes_value(true),
         )
         .get_matches();
@@ -88,23 +96,32 @@ fn main() -> Result<()> {
     let stdout = io::stdout();
     let mut stdout = BufWriter::new(stdout.lock());
     let stdin = io::stdin();
-    for line in stdin.lock().lines() {
-        let line = line?;
-        let line_fields: Vec<&str> = match delim {
-            Delimiter::String(ref s) => line.split(s.as_str()).collect(),
-            Delimiter::Whitespace => line.split_whitespace().collect(),
-        };
 
-        for (idx, field_idx) in selector.fields.iter().enumerate() {
-            match line_fields.get(*field_idx - 1) {
-                None => continue,
-                Some(val) => stdout.write_all(val.as_bytes())?,
+    let input: Vec<Box<dyn BufRead>> = match matches.values_of("input") {
+        None => vec![Box::new(stdin.lock())],
+        Some(inputs) => inputs
+            .map(|v| -> Box<dyn BufRead> { Box::new(BufReader::new(File::open(v).unwrap())) })
+            .collect(),
+    };
+    for reader in input {
+        for line in reader.lines() {
+            let line = line?;
+            let line_fields: Vec<&str> = match delim {
+                Delimiter::String(ref s) => line.split(s.as_str()).collect(),
+                Delimiter::Whitespace => line.split_whitespace().collect(),
+            };
+
+            for (idx, field_idx) in selector.fields.iter().enumerate() {
+                match line_fields.get(*field_idx - 1) {
+                    None => continue,
+                    Some(val) => stdout.write_all(val.as_bytes())?,
+                }
+                if idx < selector.fields.len() - 1 {
+                    stdout.write_all(b":")?;
+                }
             }
-            if idx < selector.fields.len() - 1 {
-                stdout.write_all(b":")?;
-            }
+            stdout.write_all(b"\n")?;
         }
-        stdout.write_all(b"\n")?;
     }
     Ok(())
 }
