@@ -4,9 +4,9 @@ use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use clap::{App, Arg};
 
 #[macro_use]
-extern crate failure;
+extern crate anyhow;
 
-type Result<T> = ::std::result::Result<T, failure::Error>;
+use anyhow::{Context, Result};
 
 enum Delimiter {
     Whitespace,
@@ -96,29 +96,21 @@ fn main() -> Result<()> {
     let mut stdout = BufWriter::new(stdout.lock());
 
     if let Some(inputs) = matches.values_of_os("input") {
-        inputs
-            .map(|filename| (filename, File::open(filename)))
-            .map(|(filename, result)| {
-                (
-                    filename,
-                    result.map_err(|e| failure::Error::from_boxed_compat(Box::new(e))),
-                )
+        if let Err(err) = inputs
+            .map(|filename| {
+                File::open(filename)
+                    .map_err(anyhow::Error::new)
+                    .with_context(|| filename.to_string_lossy().into_owned())
             })
-            .map(|(filename, result)| (filename, result.map(BufReader::new)))
-            .map(|(filename, result)| {
-                (
-                    filename,
-                    result.map(|reader| -> Box<dyn BufRead> { Box::new(reader) }),
-                )
+            .map(|result| result.map(BufReader::new))
+            .map(|result| result.map(|reader| -> Box<dyn BufRead> { Box::new(reader) }))
+            .map(|result| {
+                result.and_then(|val| process_reader(val, &mut stdout, &delim, &selector))
             })
-            .map(|(filename, result)| {
-                (
-                    filename,
-                    result.and_then(|val| process_reader(val, &mut stdout, &delim, &selector)),
-                )
-            })
-            .map(|(_filename, result)| result)
-            .collect::<Result<Vec<()>>>()?;
+            .collect::<Result<Vec<()>>>()
+        {
+            eprintln!("rcut: {}", itertools::join(err.chain(), " "));
+        }
     } else {
         let stdin = io::stdin();
         process_reader(stdin.lock(), &mut stdout, &delim, &selector)?;
