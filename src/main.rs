@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
-
 use clap::{App, Arg};
 
 #[macro_use]
