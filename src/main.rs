@@ -109,13 +109,26 @@ fn main() -> Result<()> {
             })
             .collect::<Result<Vec<()>>>()
         {
-            eprintln!("rcut: {}", itertools::join(err.chain(), " "));
+            muffle_epipe(err)?;
         }
     } else {
         let stdin = io::stdin();
-        process_reader(stdin.lock(), &mut stdout, &delim, &selector)?;
+        if let Err(err) = process_reader(stdin.lock(), &mut stdout, &delim, &selector) {
+            muffle_epipe(err)?;
+        }
     }
     Ok(())
+}
+
+fn muffle_epipe(err: anyhow::Error) -> Result<()> {
+    for cause in err.chain() {
+        if let Some(io_err) = cause.downcast_ref::<io::Error>() {
+            if io_err.kind() == io::ErrorKind::BrokenPipe {
+                return Ok(());
+            }
+        }
+    }
+    Err(err)
 }
 
 fn process_reader<T: BufRead, W: Write>(
