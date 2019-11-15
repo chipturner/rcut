@@ -96,7 +96,6 @@ fn main() -> Result<()> {
             .value_of("output_separator")
             .unwrap_or_else(|| matches.value_of("delimiter").unwrap_or(" ")),
     );
-    dbg!(&matches);
 
     let job = CutJob {
         input_delim,
@@ -145,7 +144,7 @@ fn muffle_epipe(err: anyhow::Error) -> Result<()> {
 impl CutJob {
     // Read a stream, splitting each line on the Delimiter and outputting
     // as requested by the field Selector.
-    fn process_reader<T: BufRead, W: Write>(&self, reader: T, output: &mut W) -> Result<()> {
+    fn process_reader(&self, reader: impl BufRead, output: &mut impl Write) -> Result<()> {
         for line in reader.lines() {
             let line = line?;
             let line_fields: Vec<&str> = match self.input_delim {
