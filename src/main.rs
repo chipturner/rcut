@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Cursor, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
 use clap::{App, Arg};
 
@@ -174,6 +174,7 @@ impl CutJob {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
     use super::*;
 
     #[test]
