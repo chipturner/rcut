@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
-use clap::{App, Arg};
+use clap::{App, AppSettings, Arg};
 
 #[macro_use]
 extern crate anyhow;
@@ -14,7 +14,7 @@ enum Delimiter {
 }
 
 struct FieldSelector {
-    fields: Vec<usize>,
+    fields: Vec<isize>,
 }
 
 struct CutJob {
@@ -23,25 +23,31 @@ struct CutJob {
     output_separator: String,
 }
 
-fn field_parser(s: &str) -> Result<FieldSelector> {
+fn field_parser<S: Into<String>>(s: S) -> Result<FieldSelector> {
+    let s = s.into();
+    if s.starts_with('-') {
+        return Ok(FieldSelector {
+            fields: vec![s.parse::<isize>()?],
+        });
+    }
     let field_indexes = s
         .split(',')
         .map(|t| {
-            let mut ranges = t.splitn(2, '-').map(|s| s.parse::<usize>());
+            let mut ranges = t.splitn(2, '-').map(|s| s.parse::<isize>());
             let start = ranges
                 .next()
                 .ok_or_else(|| format_err!("empty field range"))??;
             let stop = ranges.next().unwrap_or(Ok(start))?;
             if start < stop {
-                Ok((start..=stop).collect::<Vec<usize>>())
+                Ok((start..=stop).collect::<Vec<isize>>())
             } else {
-                Ok((stop..=start).rev().collect::<Vec<usize>>())
+                Ok((stop..=start).rev().collect::<Vec<isize>>())
             }
         })
-        .collect::<Result<Vec<Vec<usize>>>>()?
+        .collect::<Result<Vec<Vec<isize>>>>()?
         .into_iter()
         .flatten()
-        .collect::<Vec<usize>>();
+        .collect::<Vec<isize>>();
 
     Ok(FieldSelector {
         fields: field_indexes,
@@ -51,6 +57,8 @@ fn field_parser(s: &str) -> Result<FieldSelector> {
 fn main() -> Result<()> {
     let matches = App::new("rcut")
         .version("1.0")
+        .setting(AppSettings::AllowLeadingHyphen)
+        .setting(AppSettings::AllowNegativeNumbers)
         .author("Chip Turner <cturner@pattern.net>")
         .about("cut-like tool with smoother aesthetics")
         .arg(
@@ -71,13 +79,13 @@ fn main() -> Result<()> {
             Arg::with_name("fields")
                 .short("f")
                 .long("fields")
-                .required(true)
+                .required(false)
                 .help("fields to select")
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("input")
-                .help("file(s) to process (otherwise read from stdin)")
+            Arg::with_name("args")
+                .help("file(s) to process or field selectors")
                 .index(1)
                 .multiple(true)
                 .required(false)
@@ -85,12 +93,31 @@ fn main() -> Result<()> {
         )
         .get_matches();
 
+    let args: Vec<&std::ffi::OsStr> = matches.values_of_os("args").unwrap().collect();
+    let (selector_from_args, selector) = if matches.is_present("fields") {
+        (
+            false,
+            field_parser(String::from(matches.value_of("fields").unwrap())),
+        )
+    } else {
+        (
+            true,
+            field_parser(
+                args.iter()
+                    .map(|s| s.to_str().unwrap())
+                    .collect::<Vec<&str>>()
+                    .join(","),
+            ),
+        )
+    };
+    let selector = selector?;
+
     let input_delim = matches
         .value_of("delimiter")
         .map_or(Delimiter::Whitespace, |v| {
             Delimiter::String(String::from(v))
         });
-    let selector = field_parser(matches.value_of("fields").unwrap_or("1"))?;
+
     let output_separator = String::from(
         matches
             .value_of("output_separator")
@@ -106,9 +133,9 @@ fn main() -> Result<()> {
     let stdout = io::stdout();
     let mut stdout = BufWriter::new(stdout.lock());
 
-    // If given a list of files on the command line, process them.  Otherwise, use stdin.
-    if let Some(inputs) = matches.values_of_os("input") {
-        if let Err(err) = inputs
+    if !selector_from_args {
+        if let Err(err) = args
+            .iter()
             .map(|filename| {
                 File::open(filename).with_context(|| filename.to_string_lossy().into_owned())
             })
@@ -154,7 +181,12 @@ impl CutJob {
 
             let mut needs_sep = false;
             for field_idx in self.selector.fields.iter() {
-                match line_fields.get(*field_idx - 1) {
+                let field_idx = if *field_idx < 0 {
+                    line_fields.len() - (-*field_idx as usize) + 1
+                } else {
+                    *field_idx as usize
+                };
+                match line_fields.get(field_idx - 1) {
                     None => continue,
                     Some(val) => {
                         if needs_sep {
@@ -174,12 +206,13 @@ impl CutJob {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn test_simple_field() {
         assert_eq!(field_parser("1").unwrap().fields, vec![1]);
+        assert_eq!(field_parser("-1").unwrap().fields, vec![-1]);
         assert_eq!(field_parser("1,2").unwrap().fields, vec![1, 2]);
         assert_eq!(field_parser("1-2,3-4").unwrap().fields, vec![1, 2, 3, 4]);
         assert_eq!(field_parser("2-1,3-4").unwrap().fields, vec![2, 1, 3, 4]);
