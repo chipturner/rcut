@@ -57,7 +57,6 @@ fn field_parser<S: Into<String>>(s: S) -> Result<FieldSelector> {
 fn main() -> Result<()> {
     let matches = App::new("rcut")
         .version("1.0")
-        .setting(AppSettings::AllowLeadingHyphen)
         .setting(AppSettings::AllowNegativeNumbers)
         .author("Chip Turner <cturner@pattern.net>")
         .about("cut-like tool with smoother aesthetics")
