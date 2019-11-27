@@ -1,5 +1,6 @@
+use std::clone::Clone;
+use std::ffi::OsString;
 use std::fs::File;
-use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
 use clap::{App, AppSettings, Arg};
@@ -9,15 +10,18 @@ extern crate anyhow;
 
 use anyhow::{Context, Result};
 
+#[derive(Debug)]
 enum Delimiter {
     Whitespace,
     String(String),
 }
 
+#[derive(Debug)]
 struct FieldSelector {
     fields: Vec<isize>,
 }
 
+#[derive(Debug)]
 struct CutJob {
     input_delim: Delimiter,
     selector: FieldSelector,
@@ -50,8 +54,11 @@ fn field_parser<S: Into<String>>(s: S) -> Result<FieldSelector> {
     })
 }
 
-fn main() -> Result<()> {
-    let matches = App::new("rcut")
+fn parse_command_line<S>(params: Option<Vec<S>>) -> Result<(CutJob, Vec<OsString>)>
+where
+    S: Into<OsString> + Clone,
+{
+    let matcher = App::new("rcut")
         .version("1.0")
         .setting(AppSettings::AllowNegativeNumbers)
         .author("Chip Turner <cturner@pattern.net>")
@@ -85,22 +92,31 @@ fn main() -> Result<()> {
                 .multiple(true)
                 .required(false)
                 .takes_value(true),
-        )
-        .get_matches();
+        );
+    let matches = match params {
+        Some(p) => matcher.get_matches_from_safe(p)?,
+        None => matcher.get_matches_safe()?,
+    };
 
-    let args: Vec<&OsStr> = matches
-        .values_of_os("args")
-        .ok_or_else(|| anyhow!("No field specified(use '-f ...' or positional selectors"))?
-        .collect();
-    let selector = if matches.is_present("fields") {
-            field_parser(String::from(matches.value_of("fields").unwrap()))
+    let args: Vec<OsString> = match matches.values_of_os("args") {
+        Some(vals) => vals.map(OsString::from).collect(),
+        None => vec![],
+    };
+    let (selector, args) = if matches.is_present("fields") {
+        (
+            field_parser(String::from(matches.value_of("fields").unwrap())),
+            args,
+        )
     } else {
+        (
             field_parser(
                 args.iter()
                     .map(|s| s.to_str().unwrap())
                     .collect::<Vec<&str>>()
                     .join(","),
-            )
+            ),
+            vec![],
+        )
     };
     let selector = selector?;
 
@@ -116,30 +132,37 @@ fn main() -> Result<()> {
             .unwrap_or_else(|| matches.value_of("delimiter").unwrap_or(" ")),
     );
 
-    let job = CutJob {
+    let cut_job = CutJob {
         input_delim,
         selector,
         output_separator,
     };
 
+    Ok((cut_job, args))
+}
+
+fn main() -> Result<()> {
+    let (cut_job, args) = parse_command_line::<OsString>(None)?;
+    dbg!(&cut_job);
+    dbg!(&args);
     let stdout = io::stdout();
     let mut stdout = BufWriter::new(stdout.lock());
 
-    if args.is_empty() {
+    if !args.is_empty() {
         if let Err(err) = args
             .iter()
             .map(|filename| {
                 File::open(filename).with_context(|| filename.to_string_lossy().into_owned())
             })
             .map(|result| result.map(|fh| Box::new(BufReader::new(fh))))
-            .map(|result| result.and_then(|val| job.process_reader(val, &mut stdout)))
+            .map(|result| result.and_then(|val| cut_job.process_reader(val, &mut stdout)))
             .collect::<Result<Vec<()>>>()
         {
             muffle_epipe(err)?;
         }
     } else {
         let stdin = io::stdin();
-        if let Err(err) = job.process_reader(stdin.lock(), &mut stdout) {
+        if let Err(err) = cut_job.process_reader(stdin.lock(), &mut stdout) {
             muffle_epipe(err)?;
         }
     }
@@ -202,9 +225,18 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
+    fn test_parsing() {
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "-f", "1"])).unwrap();
+        assert_eq!(cut_job.selector.fields, vec![1]);
+        assert_eq!(args, Vec::<OsString>::new());
+
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1"])).unwrap();
+        assert_eq!(cut_job.selector.fields, vec![1]);
+        assert_eq!(args, Vec::<OsString>::new());
+    }
+    #[test]
     fn test_simple_field() {
         assert_eq!(field_parser("1").unwrap().fields, vec![1]);
-        assert_eq!(field_parser("-1").unwrap().fields, vec![-1]);
         assert_eq!(field_parser("1,2").unwrap().fields, vec![1, 2]);
         assert_eq!(field_parser("1-2,3-4").unwrap().fields, vec![1, 2, 3, 4]);
         assert_eq!(field_parser("2-1,3-4").unwrap().fields, vec![2, 1, 3, 4]);
