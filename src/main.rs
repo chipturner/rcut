@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
 use clap::{App, AppSettings, Arg};
@@ -25,11 +26,6 @@ struct CutJob {
 
 fn field_parser<S: Into<String>>(s: S) -> Result<FieldSelector> {
     let s = s.into();
-    if s.starts_with('-') {
-        return Ok(FieldSelector {
-            fields: vec![s.parse::<isize>()?],
-        });
-    }
     let field_indexes = s
         .split(',')
         .map(|t| {
@@ -92,22 +88,19 @@ fn main() -> Result<()> {
         )
         .get_matches();
 
-    let args: Vec<&std::ffi::OsStr> = matches.values_of_os("args").unwrap().collect();
-    let (selector_from_args, selector) = if matches.is_present("fields") {
-        (
-            false,
-            field_parser(String::from(matches.value_of("fields").unwrap())),
-        )
+    let args: Vec<&OsStr> = matches
+        .values_of_os("args")
+        .ok_or_else(|| anyhow!("No field specified(use '-f ...' or positional selectors"))?
+        .collect();
+    let selector = if matches.is_present("fields") {
+            field_parser(String::from(matches.value_of("fields").unwrap()))
     } else {
-        (
-            true,
             field_parser(
                 args.iter()
                     .map(|s| s.to_str().unwrap())
                     .collect::<Vec<&str>>()
                     .join(","),
-            ),
-        )
+            )
     };
     let selector = selector?;
 
@@ -132,7 +125,7 @@ fn main() -> Result<()> {
     let stdout = io::stdout();
     let mut stdout = BufWriter::new(stdout.lock());
 
-    if !selector_from_args {
+    if args.is_empty() {
         if let Err(err) = args
             .iter()
             .map(|filename| {
