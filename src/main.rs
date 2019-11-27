@@ -30,6 +30,11 @@ struct CutJob {
 
 fn field_parser<S: Into<String>>(s: S) -> Result<FieldSelector> {
     let s = s.into();
+    if s.starts_with('-') {
+        return Ok(FieldSelector {
+            fields: vec![s.parse::<isize>()?],
+        });
+    }
     let field_indexes = s
         .split(',')
         .map(|t| {
@@ -225,25 +230,46 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn test_parsing() {
-        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "-f", "1"])).unwrap();
+    fn test_parsing() -> Result<()> {
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "-f", "1"]))?;
         assert_eq!(cut_job.selector.fields, vec![1]);
         assert_eq!(args, Vec::<OsString>::new());
 
-        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1"])).unwrap();
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1"]))?;
         assert_eq!(cut_job.selector.fields, vec![1]);
         assert_eq!(args, Vec::<OsString>::new());
+
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "-1"]))?;
+        assert_eq!(cut_job.selector.fields, vec![-1]);
+        assert_eq!(args, Vec::<OsString>::new());
+
+        let (cut_job, args) =
+            parse_command_line(Some(vec!["rcut_test", "-f", "1", "/etc/passwd"]))?;
+        assert_eq!(cut_job.selector.fields, vec![1]);
+        assert_eq!(args, vec!["/etc/passwd"]);
+
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1-5"]))?;
+        assert_eq!(cut_job.selector.fields, vec![1, 2, 3, 4, 5]);
+        assert_eq!(args, Vec::<OsString>::new());
+
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1-5"]))?;
+        assert_eq!(cut_job.selector.fields, vec![1, 2, 3, 4, 5]);
+        assert_eq!(args, Vec::<OsString>::new());
+
+        Ok(())
     }
     #[test]
-    fn test_simple_field() {
-        assert_eq!(field_parser("1").unwrap().fields, vec![1]);
-        assert_eq!(field_parser("1,2").unwrap().fields, vec![1, 2]);
-        assert_eq!(field_parser("1-2,3-4").unwrap().fields, vec![1, 2, 3, 4]);
-        assert_eq!(field_parser("2-1,3-4").unwrap().fields, vec![2, 1, 3, 4]);
+    fn test_simple_field() -> Result<()> {
+        assert_eq!(field_parser("1")?.fields, vec![1]);
+        assert_eq!(field_parser("1,2")?.fields, vec![1, 2]);
+        assert_eq!(field_parser("1-2,3-4")?.fields, vec![1, 2, 3, 4]);
+        assert_eq!(field_parser("2-1,3-4")?.fields, vec![2, 1, 3, 4]);
+
+        Ok(())
     }
 
     #[test]
-    fn test_cut_job() {
+    fn test_cut_job() -> Result<()> {
         let input_delim = Delimiter::Whitespace;
         let selector = FieldSelector {
             fields: vec![1, 3, 5],
@@ -255,7 +281,9 @@ mod tests {
             selector,
             output_separator: " ".to_string(),
         };
-        job.process_reader(input, &mut output).unwrap();
+        job.process_reader(input, &mut output)?;
         assert_eq!(output.get_ref(), &"a c e\np r t\ni k\n".as_bytes());
+
+        Ok(())
     }
 }
