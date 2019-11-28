@@ -230,7 +230,7 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn test_parsing() -> Result<()> {
+    fn test_cli_parsing() -> Result<()> {
         let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "-f", "1"]))?;
         assert_eq!(cut_job.selector.fields, vec![1]);
         assert_eq!(args, Vec::<OsString>::new());
@@ -258,8 +258,9 @@ mod tests {
 
         Ok(())
     }
+
     #[test]
-    fn test_simple_field() -> Result<()> {
+    fn test_simple_field_parsing() -> Result<()> {
         assert_eq!(field_parser("1")?.fields, vec![1]);
         assert_eq!(field_parser("1,2")?.fields, vec![1, 2]);
         assert_eq!(field_parser("1-2,3-4")?.fields, vec![1, 2, 3, 4]);
