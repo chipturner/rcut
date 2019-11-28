@@ -263,6 +263,8 @@ mod tests {
     fn test_simple_field_parsing() -> Result<()> {
         assert_eq!(field_parser("1")?.fields, vec![1]);
         assert_eq!(field_parser("1,2")?.fields, vec![1, 2]);
+        assert_eq!(field_parser("1-1")?.fields, vec![1]);
+        assert_eq!(field_parser("1-4")?.fields, vec![1,2,3,4]);
         assert_eq!(field_parser("1-2,3-4")?.fields, vec![1, 2, 3, 4]);
         assert_eq!(field_parser("2-1,3-4")?.fields, vec![2, 1, 3, 4]);
 
