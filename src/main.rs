@@ -16,7 +16,7 @@ enum Delimiter {
     String(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct FieldRange {
     start: isize,
     stop: isize,
@@ -31,12 +31,6 @@ impl FieldRange {
             start: val,
             stop: val,
         }
-    }
-}
-
-impl PartialEq for FieldRange {
-    fn eq(&self, other: &Self) -> bool {
-        self.start == other.start && self.stop == other.stop
     }
 }
 
