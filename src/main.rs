@@ -1,9 +1,11 @@
-use std::clone::Clone;
-use std::ffi::OsString;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::{
+    clone::Clone,
+    ffi::OsString,
+    fs::File,
+    io::{self, BufRead, BufReader, BufWriter, Write},
+};
 
-use clap::{App, AppSettings, Arg};
+use clap::{Arg, Command};
 
 #[macro_use]
 extern crate anyhow;
@@ -72,52 +74,52 @@ fn field_parser<S: Into<String>>(s: S) -> Result<FieldSelector> {
 
 fn parse_command_line<S>(params: Option<Vec<S>>) -> Result<(CutJob, Vec<OsString>)>
 where
-    S: Into<OsString> + Clone,
+    S: Into<OsString> + Clone + std::fmt::Debug,
 {
-    let matcher = App::new("rcut")
+    let matcher = Command::new("rcut")
         .version("1.0")
-        .setting(AppSettings::AllowNegativeNumbers)
         .author("Chip Turner <cturner@pattern.net>")
         .about("cut-like tool with smoother aesthetics")
         .arg(
-            Arg::with_name("delimiter")
-                .short("d")
-                .long("delimiter")
+            Arg::new("delimiter")
+                .short('d')
+                .multiple_occurrences(false)
                 .help("field delimiter")
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("output_separator")
-                .short("o")
-                .long("output_separator")
+            Arg::new("output_separator")
+                .short('o')
+                .multiple_occurrences(false)
                 .help("separator used when printing fields")
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("fields")
-                .short("f")
-                .long("fields")
-                .required(false)
+            Arg::new("fields")
+                .short('f')
                 .help("fields to select")
+                .multiple_occurrences(false)
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("args")
+            Arg::new("args")
                 .help("file(s) to process or field selectors")
-                .index(1)
-                .multiple(true)
+                .multiple_occurrences(true)
                 .required(false)
-                .takes_value(true),
+                .takes_value(true)
+                .index(1)
+                .allow_invalid_utf8(true),
         );
-    let matches = match params {
-        Some(p) => matcher.get_matches_from_safe(p)?,
-        None => matcher.get_matches_safe()?,
-    };
 
+    let matches = match params {
+        Some(p) => matcher.try_get_matches_from(p)?,
+        None => matcher.try_get_matches()?,
+    };
     let args: Vec<OsString> = match matches.values_of_os("args") {
         Some(vals) => vals.map(OsString::from).collect(),
         None => vec![],
     };
+
     let (selector, args) = if matches.is_present("fields") {
         (
             field_parser(String::from(matches.value_of("fields").unwrap())),
@@ -237,87 +239,88 @@ impl CutJob {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
 
+    use super::*;
+
     #[test]
-    fn test_cli_parsing() -> Result<()> {
-        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "-f", "1"]))?;
+    fn test_cli_parsing() {
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "-f", "1"])).unwrap();
         assert_eq!(cut_job.selector.fields, vec![FieldRange::new_val(1)]);
         assert_eq!(args, Vec::<OsString>::new());
 
-        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1"]))?;
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1"])).unwrap();
         assert_eq!(cut_job.selector.fields, vec![FieldRange::new_val(1)]);
-        assert_eq!(args, Vec::<OsString>::new());
-
-        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "-1"]))?;
-        assert_eq!(cut_job.selector.fields, vec![FieldRange::new_val(-1)]);
         assert_eq!(args, Vec::<OsString>::new());
 
         let (cut_job, args) =
-            parse_command_line(Some(vec!["rcut_test", "-f", "1", "/etc/passwd"]))?;
+            parse_command_line(Some(vec!["rcut_test", "-f", "1", "/etc/passwd"])).unwrap();
         assert_eq!(cut_job.selector.fields, vec![FieldRange::new_val(1)]);
         assert_eq!(args, vec!["/etc/passwd"]);
 
-        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1-5"]))?;
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1-5"])).unwrap();
         assert_eq!(cut_job.selector.fields, vec![FieldRange::new_span(1, 5)]);
         assert_eq!(args, Vec::<OsString>::new());
 
-        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1-5"]))?;
+        let (cut_job, args) = parse_command_line(Some(vec!["rcut_test", "1-5"])).unwrap();
         assert_eq!(cut_job.selector.fields, vec![FieldRange::new_span(1, 5)]);
         assert_eq!(args, Vec::<OsString>::new());
-
-        Ok(())
     }
 
     #[test]
-    fn test_simple_field_parsing() -> Result<()> {
+    fn test_simple_field_parsing() {
         assert_eq!(FieldRange::new_val(1), FieldRange::new_span(1, 1));
-        assert_eq!(field_parser("1")?.fields, vec![FieldRange::new_val(1)]);
         assert_eq!(
-            field_parser("1,2")?.fields,
+            field_parser("1").unwrap().fields,
+            vec![FieldRange::new_val(1)]
+        );
+        assert_eq!(
+            field_parser("1,2").unwrap().fields,
             vec![FieldRange::new_val(1), FieldRange::new_val(2)]
         );
-        assert_eq!(field_parser("1-1")?.fields, vec![FieldRange::new_val(1)]);
         assert_eq!(
-            field_parser("1-4")?.fields,
+            field_parser("1-1").unwrap().fields,
+            vec![FieldRange::new_val(1)]
+        );
+        assert_eq!(
+            field_parser("1-4").unwrap().fields,
             vec![FieldRange::new_span(1, 4)]
         );
         assert_eq!(
-            field_parser("1-2,3-4")?.fields,
+            field_parser("1-2,3-4").unwrap().fields,
             vec![FieldRange::new_span(1, 2), FieldRange::new_span(3, 4)]
         );
         assert_eq!(
-            field_parser("2-1,3-4")?.fields,
+            field_parser("2-1,3-4").unwrap().fields,
             vec![FieldRange::new_span(2, 1), FieldRange::new_span(3, 4)]
         );
-
-        Ok(())
     }
 
     fn exec_cut_job(job: CutJob, input: &str) -> Result<String> {
         let input = BufReader::new(input.as_bytes());
         let mut output = Cursor::new(vec![]);
-        job.process_reader(input, &mut output)?;
-        Ok(String::from_utf8(output.get_ref().to_vec())?)
+        job.process_reader(input, &mut output).unwrap();
+        Ok(String::from_utf8(output.get_ref().to_vec()).unwrap())
     }
 
     #[test]
-    fn test_cut_job() -> Result<()> {
+    fn test_cut_job() {
         let simple_alphabet = "a b c d e f g\np q r s t u\ni j k\n";
         let job = CutJob {
             input_delim: Delimiter::Whitespace,
-            selector: field_parser("-1")?,
+            selector: field_parser("-1").unwrap(),
             output_separator: " ".to_string(),
         };
-        assert_eq!(exec_cut_job(job, simple_alphabet)?, "g\nu\nk\n");
+        assert_eq!(exec_cut_job(job, simple_alphabet).unwrap(), "g\nu\nk\n");
 
         let job = CutJob {
             input_delim: Delimiter::Whitespace,
-            selector: field_parser("1-3")?,
+            selector: field_parser("1-3").unwrap(),
             output_separator: " ".to_string(),
         };
-        assert_eq!(exec_cut_job(job, simple_alphabet)?, "a b c\np q r\ni j k\n");
-        Ok(())
+        assert_eq!(
+            exec_cut_job(job, simple_alphabet).unwrap(),
+            "a b c\np q r\ni j k\n"
+        );
     }
 }
